@@ -15,8 +15,6 @@
 
 #define WinX 600
 #define WinY 600
-#define blocknum 5
-#define fieldsize 100
 GLvoid drawScene(GLvoid);
 GLvoid Reshape(int w, int h);
 GLvoid Keyboard(unsigned char key, int x, int y);
@@ -169,6 +167,7 @@ public:
 int** field;
 int** answer;
 int hor, ver;
+int blockNum;
 structure bottom("Plane.obj", 0, 0, 0);
 Cam c(0, 0, 0.5, glm::vec3(0, 1, 0));
 
@@ -744,13 +743,18 @@ GLvoid setAnswer() {
 		}
 	}
 	now->next = NULL;
+	std::cout << "Field" << std::endl;
 	for (int z = 0; z < ver; ++z) {
 		for (int x = 0; x < hor; ++x) {
 			std::cout << field[z][x] << "\t";
+			if (field[z][x] == 0) {
+				blockNum++;
+			}
 		}
 		std::cout << std::endl;
 	}
 	std::cout << "--------------------------------------------------------------------------------------------" << std::endl;
+	std::cout << "Answer" << std::endl;
 	for (int z = 0; z < ver; ++z) {
 		for (int x = 0; x < hor; ++x) {
 			std::cout << answer[z][x] << "\t";
