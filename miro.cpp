@@ -217,6 +217,7 @@ int** field;
 int** route;
 int hor, ver;
 int blockNum;
+bool TAB;
 structure bottom("Plane.obj", 0, 0, 0);
 structure start("Plane.obj", 1, 0.3, 1);
 structure finish("Plane.obj", 0, 1, 0);
@@ -847,23 +848,35 @@ GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 	glm::mat4 Model(1.0f);
 	int ModelLoc = glGetUniformLocation(shaderProgram, "ModelTransform");
 	glUniformMatrix4fv(ModelLoc, 1, GL_FALSE, glm::value_ptr(Model));
-
 	glm::mat4 View(1.0f);
-	View = glm::lookAt(top.camPos, top.camAt, top.camUp);
-	View = glm::rotate(View, glm::radians(top.camRot), glm::vec3(0, 1, 0));			// Y 축 기준으로 돌리기 공전
 	int ViewLoc = glGetUniformLocation(shaderProgram, "ViewTransform");
-	glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
-
 	glm::mat4 Proj(1.0f);
 	int ProjLoc = glGetUniformLocation(shaderProgram, "ProjectionTransform");
-	Proj = glm::ortho(-100.f, 100.f, -100.f, 100.f, 0.f, 301.f);
-	glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
+	if (TAB) {
+		View = glm::lookAt(top.camPos, top.camAt, top.camUp);
+		View = glm::rotate(View, glm::radians(180.f), glm::vec3(0, 1, 0));
+		glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
+
+		Proj = glm::ortho(-100.f, 100.f, -100.f, 100.f, 0.f, 301.f);
+		glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
+	}
+	else {
+		View = glm::lookAt(smalltop.camPos, smalltop.camAt, smalltop.camUp);
+		View = glm::translate(View, glm::vec3(-(FieldScale / 10 - FieldScale / 10 / hor), 0, -(FieldScale / 10 - FieldScale / 10 / ver)));
+		View = glm::translate(View, glm::vec3(player.transX, 0, player.transZ));
+		View = glm::rotate(View, glm::radians(180.f), glm::vec3(0, 1, 0));
+		glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
+
+		Proj = glm::ortho(-30.f, 30.f, -30.f, 30.f, 0.f, 301.f);
+		glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
+	}
+
 
 	bottom.Scale(FieldScale, 0, FieldScale);
 	glBindVertexArray(bottom.VAO);
 	glDrawElements(GL_TRIANGLES, bottom.faceNum * 3, GL_UNSIGNED_INT, 0);
 	bottom.transReset();
-	
+
 	start.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), 0.01, -(FieldScale / 10 - FieldScale / 10 / ver));
 	start.Scale(FieldScale / hor, 0, FieldScale / ver);
 	glBindVertexArray(start.VAO);
@@ -965,6 +978,10 @@ GLvoid Reshape(int w, int h)									//--- 콜백 함수: 다시 그리기 콜백 함수
 GLvoid Keyboard(unsigned char key, int x, int y)
 {
 	switch (key) {
+	case '\t':
+		TAB = !TAB;
+
+		break;
 	case 'q':
 	case 'Q':
 		for (int i = 0; i < hor; ++i) {
