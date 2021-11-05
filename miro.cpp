@@ -22,13 +22,14 @@ GLvoid Keyboard(unsigned char key, int x, int y);
 GLvoid Timer(int value);
 GLvoid MouseMove(int x, int y);
 GLvoid setroute();
+GLvoid choongdol(char c);
 
 void make_vertexShaders();
 void make_fragmentShaders();
 GLuint make_shaderProgram();
 GLvoid InitBuffer();
 GLvoid SpecialKey(int key, int x, int y);
-
+GLvoid hwakin(char key, int side);
 std::random_device rd;
 std::default_random_engine dre(rd());
 std::uniform_int_distribution<>uid(0, 3);
@@ -49,7 +50,7 @@ public:
 	float* vertexColor;
 	unsigned int* vertexFace;
 	glm::mat4 trans{ 1.0f };
-	float rotX{}, rotY{}, rotZ{}, transX{}, transY{}, transZ{}, scaleX{ 1.0f }, scaleY{ 1.0f }, scaleZ{ 1.0f }, speed, x, z, maxY{};
+	float rotX{}, rotY{}, rotZ{}, transX{}, transY{}, transZ{}, scaleX{ 1.0f }, scaleY{ 1.0f }, scaleZ{ 1.0f }, speed, x, z, maxY{}, r;
 	bool up;
 	structure(const char* FileName, float R, float G, float B) {
 		VAO = VBO = EBO = vertexNum = faceNum = 0;
@@ -176,9 +177,8 @@ public:
 	glm::vec3 startPos;
 
 	Cam() {
-		atRot = 0;
-		camPos = glm::vec3(1.0f, 0.8f, 0.0f);							// 카메라 위치
-		startPos = camPos;
+		camPos = glm::vec3(0, 0, 0);
+		camAt = glm::vec3(0, 0, 0);
 		camDir = glm::normalize(camPos - camAt);							// at -> cam 방향벡터
 		camUp = glm::cross(camDir, glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), camDir)));		// (고정식) 캠의 세로 평면과 수직을 이루는값을 노멀라이즈한 값을 캠의 방향벡터로 up구하기
 	}
@@ -206,8 +206,6 @@ public:
 	}
 
 	void camreset() {
-		camPos = startPos;
-		camAt = glm::vec3(0, 0, 0);
 		atRot = 0;
 		camRot = 0;
 	}
@@ -215,18 +213,22 @@ public:
 
 int** field;
 int** route;
+int** mountain;
 int hor, ver;
 int blockNum;
-bool TAB;
+bool TAB, R, O, V;
+int perspective = 2;
+glm::vec2 startmouse(WinX/2, WinY/2);
 structure bottom("Plane.obj", 0, 0, 0);
 structure start("Plane.obj", 1, 0.3, 1);
 structure finish("Plane.obj", 0, 1, 0);
 structure player("sphere.obj", 1, 0, 0);
 structure* blocks;
+structure* mountains;
 Cam top(0, 300, 0, glm::vec3(0, 0, -1));
 Cam smalltop(0, 100, 0, glm::vec3(0, 0, -1));
-Cam FPP(-50, 0, -50, glm::vec3(0, 1, 0));
-Cam TPP(-50, 0, -50, glm::vec3(0, 1, 0));
+Cam FPP(0, 0, 0, glm::vec3(0, 1, 0));
+Cam TPP(-20, 0, -50, glm::vec3(0, 1, 0));
 Cam Map(0, 100, -300, glm::vec3(0, 1, 0));
 void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 {
@@ -247,13 +249,12 @@ void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 	else
 		std::cout << "GLEW Initialized\n";
 	glFrontFace(GL_CCW);
-	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	shaderProgram = make_shaderProgram();
 	glutDisplayFunc(drawScene);									// 출력 콜백함수의 지정
 	glutReshapeFunc(Reshape);									// 다시 그리기 콜백함수 지정
 	glutKeyboardFunc(Keyboard);									// 키보드 입력 콜백함수 지정
-	glutMotionFunc(MouseMove);
+	glutPassiveMotionFunc(MouseMove);
 	glutSpecialFunc(SpecialKey);
 	for (int i = 0; i < 1; ++i) {
 		std::cout << "가로, 세로 : ";
@@ -265,12 +266,15 @@ void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 	}
 	field = new int* [ver];
 	route = new int* [ver];
-	for (int i = 0; i < hor; ++i) {
+	mountain = new int* [ver];
+	for (int i = 0; i < ver; ++i) {
 		field[i] = new int[hor];
 		route[i] = new int[hor];
+		mountain[i] = new int[hor];
 	}
-	glutTimerFunc(10, Timer, 0);
-	setroute();
+	std::cout << "1: 1인칭 시점\n2: 맵을 전체를 보는 시점\n3: 3인칭 시점\nTab: 미니맵 전환\nQ: 프로그램 종료\nW: 객체 앞으로 이동\nA: 객체 왼쪽으로 이동\nS: 객체 뒤로 이동\nD: 객체 오른쪽으로 이동\nR: 미로 제작\n"<<
+		"O: 직각 투영\nP: 원근 투영\nY: 맵 전체를 보는 시점에서 카메라가 Y축 기준으로 음 방향 회전\ny: 맵 전체를 보는 시점에서 카메라가 Y축 기준으로 양 방향 회전\nX: 맵 전체를 보는 시점에서 카메라가 X축 기준으로 음 방향 회전\nx: 맵 전체를 보는 시점에서 카메라가 X축 기준으로 양 방향 회전\n"<<
+		"+: 육면체 이동하는 속도 증가\n-: 육면체 이동하는 속도 감소(최소 한계치 있음)\n<<C: 모든 값 초기화\nV:육면체들 움직임이 멈추고 낮은 높이로 변함\nM: 육면체들이 움직인다\n<-: 맵 전체를 보는 시점에서 카메라가 Y축 기준으로 음 방향 회전(애니메이션 X)\n->: 맵 전체를 보는 시점에서 카메라가 Y축 기준으로 양 방향 회전(애니메이션 X)" << std::endl;
 	InitBuffer();
 	glutMainLoop();												// 이벤트 처리 시작
 }
@@ -807,10 +811,10 @@ GLvoid setroute() {
 	}
 	now->next = NULL;
 
-	std::cout << "Field" << std::endl;
+	//std::cout << "Field" << std::endl;
 	for (int z = 0; z < ver; ++z) {
 		for (int x = 0; x < hor; ++x) {
-			std::cout << field[z][x] << "\t";
+			//std::cout << field[z][x] << "\t";
 			if (field[z][x] == 0) {
 				blockNum++;
 			}
@@ -828,14 +832,23 @@ GLvoid setroute() {
 			}
 		}
 	}
-	std::cout << "--------------------------------------------------------------------------------------------" << std::endl;
-	std::cout << "route" << std::endl;
+	//std::cout << "--------------------------------------------------------------------------------------------" << std::endl;
+	//std::cout << "route" << std::endl;
 	for (int z = 0; z < ver; ++z) {
 		for (int x = 0; x < hor; ++x) {
-			std::cout << route[z][x] << "\t";
+			//std::cout << route[z][x] << "\t";
 		}
-		std::cout << std::endl;
+		//std::cout << std::endl;
 	}
+	if (hor < ver) {
+		player.r = 0.1*FieldScale / hor / 4;
+	}
+	else {
+		player.r = 0.1*FieldScale / ver / 4;
+	}
+	player.transY = FieldScale * 0.1 / hor * 0.25;
+	player.transX = -(FieldScale * 0.1 - FieldScale * 0.1 / hor);
+	player.transZ = -(FieldScale * 0.1 - FieldScale * 0.1 / ver);
 }
 GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 {
@@ -844,7 +857,6 @@ GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 	glClearColor(RED, GREEN, BLUE, 1.0f);											// 바탕색을 변경
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);		// 설정된 색으로 전체를 칠하기
 
-	glViewport(WinX * 4 / 5, WinY * 4 / 5, WinX / 5, WinY / 5);
 	glm::mat4 Model(1.0f);
 	int ModelLoc = glGetUniformLocation(shaderProgram, "ModelTransform");
 	glUniformMatrix4fv(ModelLoc, 1, GL_FALSE, glm::value_ptr(Model));
@@ -852,6 +864,108 @@ GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 	int ViewLoc = glGetUniformLocation(shaderProgram, "ViewTransform");
 	glm::mat4 Proj(1.0f);
 	int ProjLoc = glGetUniformLocation(shaderProgram, "ProjectionTransform");
+
+	glEnable(GL_DEPTH_TEST);
+	glViewport(0, 0, WinX, WinY);
+	Model = glm::mat4(1.0f);
+	glUniformMatrix4fv(ModelLoc, 1, GL_FALSE, glm::value_ptr(Model));
+
+	View = glm::mat4(1.0f);
+	switch (perspective) {
+	case 1:									// 1인칭
+		FPP.setAT(0, 0, 1);
+		View = glm::lookAt(FPP.camPos, FPP.camAt, FPP.camUp);
+		View = glm::rotate(View, glm::radians(player.rotX), glm::vec3(1, 0, 0));
+		View = glm::rotate(View, glm::radians(player.rotY), glm::vec3(0, 1, 0));
+		View = glm::translate(View, glm::vec3(-player.transX, -player.transY - 5, -player.transZ));
+		break;
+	case 2:									// 맵보기
+		View = glm::lookAt(Map.camPos, Map.camAt, Map.camUp);
+		View = glm::rotate(View, glm::radians(Map.camRot), glm::vec3(0, 1, 0));			// Y 축 기준으로 돌리기 공전
+		View = glm::rotate(View, glm::radians(Map.atRot), glm::vec3(1, 0, 0));			// Y 축 기준으로 돌리기 공전
+		break;
+	case 3:									// 3인칭
+		View = glm::lookAt(TPP.camPos, TPP.camAt, TPP.camUp);
+		View = glm::rotate(View, glm::radians(player.rotY+25), glm::vec3(0, 1, 0));
+		View = glm::translate(View, glm::vec3(-player.transX, -player.transY - 2, -player.transZ));
+		break;
+	}
+	glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
+	switch (perspective) {
+	case 2:
+		Proj = glm::mat4(1.0f);
+		if (O) {
+			Proj = glm::ortho(-100.f, 100.f, -100.f, 100.f, 0.f, 1000.f);
+		}
+		else {
+			Proj = glm::perspective(glm::radians(45.0f), (float)WinX / (float)WinY, 1.5f, 1000.f);
+		}
+		break;
+	default:
+		Proj = glm::mat4(1.0f);
+		if (O) {
+			Proj = glm::ortho(-30.f, 30.f, -30.f, 30.f, 1.5f, 200.f);
+		}
+		else {
+			Proj = glm::perspective(glm::radians(45.0f), (float)WinX / (float)WinY, 1.5f, 200.f);
+		}
+		break;
+	}
+	glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
+	bottom.Scale(FieldScale, 0, FieldScale);
+	glBindVertexArray(bottom.VAO);
+	glDrawElements(GL_TRIANGLES, bottom.faceNum * 3, GL_UNSIGNED_INT, 0);
+	bottom.transReset();
+
+	start.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), 0.01, -(FieldScale / 10 - FieldScale / 10 / ver));
+	start.Scale(FieldScale / hor, 0, FieldScale / ver);
+	glBindVertexArray(start.VAO);
+	glDrawElements(GL_TRIANGLES, start.faceNum * 3, GL_UNSIGNED_INT, 0);
+	start.transReset();
+
+	finish.Translate(FieldScale / 10 - FieldScale / 10 / hor, 0.01, FieldScale / 10 - FieldScale / 10 / ver);
+	finish.Scale(FieldScale / hor, 0, FieldScale / ver);
+	glBindVertexArray(finish.VAO);
+	glDrawElements(GL_TRIANGLES, finish.faceNum * 3, GL_UNSIGNED_INT, 0);
+	finish.transReset();
+
+	if (R) {
+		for (int i = 0; i < blockNum; ++i) {
+			blocks[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
+			blocks[i].Translate(FieldScale * 2 / 10 * blocks[i].x / hor, 0, FieldScale * 2 / 10 * blocks[i].z / ver);
+			blocks[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
+			blocks[i].Scale(FieldScale / hor, blocks[i].scaleY, FieldScale / ver);
+			glBindVertexArray(blocks[i].VAO);
+			glDrawElements(GL_TRIANGLES, blocks[i].faceNum * 3, GL_UNSIGNED_INT, 0);
+			blocks[i].transReset();
+			if (hor < ver) {
+				player.Translate(player.transX, player.transY, player.transZ);
+				player.Scale(FieldScale / hor / 4, FieldScale / hor / 4, FieldScale / hor / 4);
+
+			}
+			else {
+				player.Translate(player.transX, player.transY, player.transZ);
+				player.Scale(FieldScale / ver / 4, FieldScale / ver / 4, FieldScale / ver / 4);
+			}
+			glBindVertexArray(player.VAO);
+			glDrawElements(GL_TRIANGLES, player.faceNum * 3, GL_UNSIGNED_INT, 0);
+			player.transReset();
+		}
+	}
+	else {
+		for (int i = 0; i < hor*ver; ++i) {
+			mountains[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
+			mountains[i].Translate(FieldScale * 2 / 10 * mountains[i].x / hor, 0, FieldScale * 2 / 10 * mountains[i].z / ver);
+			mountains[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
+			mountains[i].Scale(FieldScale / hor, mountains[i].scaleY, FieldScale / ver);
+			glBindVertexArray(mountains[i].VAO);
+			glDrawElements(GL_TRIANGLES, mountains[i].faceNum * 3, GL_UNSIGNED_INT, 0);
+			mountains[i].transReset();
+		}
+	}
+	//-------------------------------------------------------------------------------------------------------------------------
+	glViewport(WinX * 4 / 5, WinY * 4 / 5, WinX / 5, WinY / 5);
+	glDisable(GL_DEPTH_TEST);
 	if (TAB) {
 		View = glm::lookAt(top.camPos, top.camAt, top.camUp);
 		View = glm::rotate(View, glm::radians(180.f), glm::vec3(0, 1, 0));
@@ -862,7 +976,6 @@ GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 	}
 	else {
 		View = glm::lookAt(smalltop.camPos, smalltop.camAt, smalltop.camUp);
-		View = glm::translate(View, glm::vec3(-(FieldScale / 10 - FieldScale / 10 / hor), 0, -(FieldScale / 10 - FieldScale / 10 / ver)));
 		View = glm::translate(View, glm::vec3(player.transX, 0, player.transZ));
 		View = glm::rotate(View, glm::radians(180.f), glm::vec3(0, 1, 0));
 		glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
@@ -871,7 +984,6 @@ GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 		glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
 	}
 
-
 	bottom.Scale(FieldScale, 0, FieldScale);
 	glBindVertexArray(bottom.VAO);
 	glDrawElements(GL_TRIANGLES, bottom.faceNum * 3, GL_UNSIGNED_INT, 0);
@@ -888,86 +1000,42 @@ GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 	glBindVertexArray(finish.VAO);
 	glDrawElements(GL_TRIANGLES, finish.faceNum * 3, GL_UNSIGNED_INT, 0);
 	finish.transReset();
+	if (R) {
+		for (int i = 0; i < blockNum; ++i) {
+			blocks[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
+			blocks[i].Translate(FieldScale * 2 / 10 * blocks[i].x / hor, 0, FieldScale * 2 / 10 * blocks[i].z / ver);
+			blocks[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
+			blocks[i].Scale(FieldScale / hor, 0, FieldScale / ver);
+			glBindVertexArray(blocks[i].VAO);
+			glDrawElements(GL_TRIANGLES, blocks[i].faceNum * 3, GL_UNSIGNED_INT, 0);
+			blocks[i].transReset();
+			if (hor < ver) {
+				player.Translate(player.transX, player.transY, player.transZ);
+				player.Scale(FieldScale / hor / 4, FieldScale / hor / 4, FieldScale / hor / 4);
 
-	for (int i = 0; i < blockNum; ++i) {
-		blocks[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
-		blocks[i].Translate(FieldScale * 2 / 10 * blocks[i].x / hor, 0, FieldScale * 2 / 10 * blocks[i].z / ver);
-		blocks[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
-		blocks[i].Scale(FieldScale / hor, 0, FieldScale / ver);
-		glBindVertexArray(blocks[i].VAO);
-		glDrawElements(GL_TRIANGLES, blocks[i].faceNum * 3, GL_UNSIGNED_INT, 0);
-		blocks[i].transReset();
-
-	}
-	if (hor < ver) {
-		player.Translate(player.transX, 0, player.transZ);
-		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale/10 / hor / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
-		player.Scale(FieldScale / hor / 2, FieldScale / hor / 2, FieldScale / hor / 2);
-
-	}
-	else {
-		player.Translate(player.transX, 0, player.transZ);
-		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale/10 / ver / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
-		player.Scale(FieldScale / ver / 2, FieldScale / ver / 2, FieldScale / ver / 2);
-	}
-	glBindVertexArray(player.VAO);
-	glDrawElements(GL_TRIANGLES, player.faceNum * 3, GL_UNSIGNED_INT, 0);
-	player.transReset();
-	//---------------------------------------------------------------------------------------------------------------
-	glViewport(0, 0, WinX, WinY);
-	Model = glm::mat4(1.0f);
-	glUniformMatrix4fv(ModelLoc, 1, GL_FALSE, glm::value_ptr(Model));
-
-	View= glm::mat4(1.0f);
-	View = glm::lookAt(Map.camPos, Map.camAt, Map.camUp);
-	View = glm::rotate(View, glm::radians(Map.camRot), glm::vec3(0, 1, 0));			// Y 축 기준으로 돌리기 공전
-	glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
-
-	Proj= glm::mat4(1.0f);
-	Proj = glm::perspective(glm::radians(45.0f), (float)WinX / (float)WinY, 1.5f, 1000.f);
-	glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
-
-	bottom.Scale(FieldScale, 0, FieldScale);
-	glBindVertexArray(bottom.VAO);
-	glDrawElements(GL_TRIANGLES, bottom.faceNum * 3, GL_UNSIGNED_INT, 0);
-	bottom.transReset();
-
-	start.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), 0.01, -(FieldScale / 10 - FieldScale / 10 / ver));
-	start.Scale(FieldScale / hor, 0, FieldScale / ver);
-	glBindVertexArray(start.VAO);
-	glDrawElements(GL_TRIANGLES, start.faceNum * 3, GL_UNSIGNED_INT, 0);
-	start.transReset();
-
-	finish.Translate(FieldScale / 10 - FieldScale / 10 / hor, 0.01, FieldScale / 10 - FieldScale / 10 / ver);
-	finish.Scale(FieldScale / hor, 0, FieldScale / ver);
-	glBindVertexArray(finish.VAO);
-	glDrawElements(GL_TRIANGLES, finish.faceNum * 3, GL_UNSIGNED_INT, 0);
-	finish.transReset();
-
-	for (int i = 0; i < blockNum; ++i) {
-		blocks[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
-		blocks[i].Translate(FieldScale * 2 / 10 * blocks[i].x / hor, 0, FieldScale * 2 / 10 * blocks[i].z / ver);
-		blocks[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
-		blocks[i].Scale(FieldScale / hor, blocks[i].scaleY, FieldScale / ver);
-		glBindVertexArray(blocks[i].VAO);
-		glDrawElements(GL_TRIANGLES, blocks[i].faceNum * 3, GL_UNSIGNED_INT, 0);
-		blocks[i].transReset();
-
-	}
-	if (hor < ver) {
-		player.Translate(player.transX, 0, player.transZ);
-		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale / 10 / hor / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
-		player.Scale(FieldScale / hor / 2, FieldScale / hor / 2, FieldScale / hor / 2);
-
+			}
+			else {
+				player.Translate(player.transX, player.transY, player.transZ);
+				player.Scale(FieldScale / ver / 4, FieldScale / ver / 4, FieldScale / ver / 4);
+			}
+			glBindVertexArray(player.VAO);
+			glDrawElements(GL_TRIANGLES, player.faceNum * 3, GL_UNSIGNED_INT, 0);
+			player.transReset();
+		}
 	}
 	else {
-		player.Translate(player.transX, 0, player.transZ);
-		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale / 10 / ver / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
-		player.Scale(FieldScale / ver / 2, FieldScale / ver / 2, FieldScale / ver / 2);
+		for (int i = 0; i < hor*ver; ++i) {
+			mountains[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
+			mountains[i].Translate(FieldScale * 2 / 10 * mountains[i].x / hor, 0, FieldScale * 2 / 10 * mountains[i].z / ver);
+			mountains[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
+			mountains[i].Scale(FieldScale / hor, 0, FieldScale / ver);
+			glBindVertexArray(mountains[i].VAO);
+			glDrawElements(GL_TRIANGLES, mountains[i].faceNum * 3, GL_UNSIGNED_INT, 0);
+			mountains[i].transReset();
+
+		}
 	}
-	glBindVertexArray(player.VAO);
-	glDrawElements(GL_TRIANGLES, player.faceNum * 3, GL_UNSIGNED_INT, 0);
-	player.transReset();
+	
 	glutSwapBuffers();											// 화면에 출력하기
 }
 GLvoid Reshape(int w, int h)									//--- 콜백 함수: 다시 그리기 콜백 함수
@@ -978,38 +1046,831 @@ GLvoid Reshape(int w, int h)									//--- 콜백 함수: 다시 그리기 콜백 함수
 GLvoid Keyboard(unsigned char key, int x, int y)
 {
 	switch (key) {
+	case '1':
+		perspective = 1;
+		break;
+	case '2':
+		perspective = 2;
+		Map.camDir = glm::normalize(Map.camPos - Map.camAt);							// at -> cam 방향벡터
+		Map.camUp = glm::cross(Map.camDir, glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), Map.camDir)));
+		break;
+	case '3':
+		perspective = 3;
+		break;
 	case '\t':
 		TAB = !TAB;
-
 		break;
 	case 'q':
 	case 'Q':
-		for (int i = 0; i < hor; ++i) {
+		for (int i = 0; i < ver; ++i) {
 			delete[] field[i];
 			delete[] route[i];
+			delete[] mountain[i];
 		}
+		delete[] mountains;
 		delete[] field;
 		delete[] route;
 		glutDestroyWindow(WindowID);
 		break;
 	case 'w':
 	case 'W':
-		player.transZ += 1;
+		if (R) {
+			player.transZ += glm::cos(glm::radians(player.rotY));
+			player.transX += glm::cos(glm::radians(90 + player.rotY));
+			std::cout << "(" << player.transX << ", " << player.transZ << ")" << std::endl;
+			choongdol('w');
+		}
 		break;
 	case 'a':
 	case 'A':
-		player.transX += 1;
+		if (R) {
+			player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+			player.transX += glm::cos(glm::radians(player.rotY));
+			choongdol('a');
+		}
 		break;
 	case 's':
 	case 'S':
-		player.transZ -= 1;
+		if (R) {
+			player.transZ -= glm::cos(glm::radians(player.rotY));
+			player.transX -= glm::cos(glm::radians(90 + player.rotY));
+			choongdol('s');
+		}
 		break;
 	case 'd':
 	case 'D':
-		player.transX -= 1;
+		if (R) {
+			player.transZ += glm::cos(glm::radians(90 + player.rotY));
+			player.transX -= glm::cos(glm::radians(player.rotY));
+			choongdol('d');
+		}
+		break;
+	case 'R':
+	case 'r':
+		if (!R) {
+			R = true;
+			setroute();
+			for (int i = 0; i < blockNum; ++i) {
+				glGenVertexArrays(1, &blocks[i].VAO);
+				glBindVertexArray(blocks[i].VAO);
+
+				glGenBuffers(1, &blocks[i].Color);
+				glBindBuffer(GL_ARRAY_BUFFER, blocks[i].Color);
+				glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexColor, GL_STATIC_DRAW);
+				glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+				glEnableVertexAttribArray(1);
+
+				glGenBuffers(1, &blocks[i].VBO);
+				glBindBuffer(GL_ARRAY_BUFFER, blocks[i].VBO);
+				glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexData, GL_STATIC_DRAW);
+				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+				glEnableVertexAttribArray(0);
+
+				glGenBuffers(1, &blocks[i].EBO);
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, blocks[i].EBO);
+				glBufferData(GL_ELEMENT_ARRAY_BUFFER, blocks[i].faceNum * 3 * sizeof(unsigned int), blocks[i].vertexFace, GL_STATIC_DRAW);
+				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
+			}
+		}
+		break;
+	case 'O':
+	case 'o':
+		O = true;
+		break;
+	case 'P':
+	case 'p':
+		O = false;
+		break;
+	case 'y':
+		glutTimerFunc(10, Timer, 'y');
+		break;
+	case 'Y':
+		glutTimerFunc(10, Timer, 'Y');
+		break;
+	case 'x':
+		glutTimerFunc(10, Timer, 'x');
+		break;
+	case 'X':
+		glutTimerFunc(10, Timer, 'X');
+		break;
+	case '=':
+		if (R) {
+			for (int i = 0; i < blockNum; ++i) {
+				blocks[i].speed++;
+			}
+		}
+		else {
+			for (int i = 0; i < hor * ver; ++i) {
+				mountains[i].speed++;
+				if (mountains[i].speed <= 0) {
+					mountains[i].speed--;
+				}
+			}
+		}
+		break;
+	case '-':
+		if (R) {
+			for (int i = 0; i < blockNum; ++i) {
+				blocks[i].speed--;
+				if (blocks[i].speed <= 0) {
+					blocks[i].speed++;
+				}
+			}
+		}
+		else {
+			for (int i = 0; i < hor * ver; ++i) {
+				mountains[i].speed--;
+				if (mountains[i].speed <= 0) {
+					mountains[i].speed++;
+				}
+			}
+		}
+		break;
+	case 'c':
+	case 'C':
+		TAB = R = O = V = false;
+		perspective = 2;
+		Map.camreset();
+		if (hor < ver) {
+			player.r = 0.1 * FieldScale / hor / 4;
+		}
+		else {
+			player.r = 0.1 * FieldScale / ver / 4;
+		}
+		player.transY = FieldScale * 0.1 / hor * 0.25;
+		player.transX = -(FieldScale * 0.1 - FieldScale * 0.1 / hor);
+		player.transZ = -(FieldScale * 0.1 - FieldScale * 0.1 / ver);
+		player.x = 0;
+		player.z = 0;
+		break;
+	case 'V':
+	case 'v':
+		if (!V) {
+			glutTimerFunc(10, Timer, 0);
+		}
+		else {
+			if (R) {
+				if (hor <= ver) {
+					for (int i = 0; i < blockNum; ++i) {
+						blocks[i].scaleY = FieldScale / 10 / hor / 2;
+					}
+				}
+				else {
+					for (int i = 0; i < blockNum; ++i) {
+						blocks[i].scaleY = FieldScale / 10 / ver / 2;
+					}
+				}
+			}
+			else {
+				if (hor <= ver) {
+					for (int i = 0; i < hor * ver; ++i) {
+						mountains[i].scaleY = FieldScale / 10 / hor / 2;
+					}
+				}
+				else {
+					for (int i = 0; i < hor * ver; ++i) {
+						mountains[i].scaleY = FieldScale / 10 / ver / 2;
+					}
+				}
+				
+			}
+		}
+		V = !V;
+		break;
+	case 'm':
+	case 'M':
+		glutTimerFunc(10, Timer, 0);
+		V = !V;
 		break;
 	}
 	glutPostRedisplay();
+}
+
+GLvoid choongdol(char c) {
+	switch (c) {
+	case 'w':
+		if (player.z == 0) {
+			if (player.x == 0) {
+				if (player.transX - player.r+ FieldScale *0.1 <= 0 || player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 좌상단 밖
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 3);
+				hwakin('w', 5);
+				hwakin('w', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >=200 || player.transZ - player.r + FieldScale * 0.1 <=0) {		// 맵 우상단 밖
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 9);
+				hwakin('w', 7);
+				hwakin('w', 6);
+			}
+			else {
+				if (player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 상단 밖
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 3);
+				hwakin('w', 5);
+				hwakin('w', 6);
+				hwakin('w', 7);
+				hwakin('w', 9);
+			}
+		}
+		else if (player.z == ver - 1) {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 12);
+				hwakin('w', 1);
+				hwakin('w', 3);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 12);
+				hwakin('w', 11);
+				hwakin('w', 9);
+			}
+			else {
+				if (player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 12);
+				hwakin('w', 11);
+				hwakin('w', 9);
+				hwakin('w', 3);
+				hwakin('w', 1);
+				
+			}
+		}
+		else {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0) {
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 12);
+				hwakin('w', 1);
+				hwakin('w', 3);
+				hwakin('w', 5);
+				hwakin('w', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('w', 12);
+				hwakin('w', 11);
+				hwakin('w', 9);
+				hwakin('w', 7);
+				hwakin('w', 6);
+			}
+			else {
+				hwakin('w', 12);
+				hwakin('w', 1);
+				hwakin('w', 3);
+				hwakin('w', 5);
+				hwakin('w', 6);
+				hwakin('w', 7);
+				hwakin('w', 9);
+				hwakin('w', 11);
+			}
+		}
+		break;
+	case 'a':
+		if (player.z == 0) {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0 || player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 좌상단 밖
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 3);
+				hwakin('a', 5);
+				hwakin('a', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200 || player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 우상단 밖
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 9);
+				hwakin('a', 7);
+				hwakin('a', 6);
+			}
+			else {
+				if (player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 상단 밖
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 3);
+				hwakin('a', 5);
+				hwakin('a', 6);
+				hwakin('a', 7);
+				hwakin('a', 9);
+			}
+		}
+		else if (player.z == ver - 1) {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 12);
+				hwakin('a', 1);
+				hwakin('a', 3);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 12);
+				hwakin('a', 11);
+				hwakin('a', 9);
+			}
+			else {
+				if (player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 12);
+				hwakin('a', 11);
+				hwakin('a', 9);
+				hwakin('a', 3);
+				hwakin('a', 1);
+
+			}
+		}
+		else {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0) {
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 12);
+				hwakin('a', 1);
+				hwakin('a', 3);
+				hwakin('a', 5);
+				hwakin('a', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('a', 12);
+				hwakin('a', 11);
+				hwakin('a', 9);
+				hwakin('a', 7);
+				hwakin('a', 6);
+			}
+			else {
+				hwakin('a', 12);
+				hwakin('a', 1);
+				hwakin('a', 3);
+				hwakin('a', 5);
+				hwakin('a', 6);
+				hwakin('a', 7);
+				hwakin('a', 9);
+				hwakin('a', 11);
+			}
+		}
+		break;
+	case 's':
+		if (player.z == 0) {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0 || player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 좌상단 밖
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 3);
+				hwakin('s', 5);
+				hwakin('s', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200 || player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 우상단 밖
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 9);
+				hwakin('s', 7);
+				hwakin('s', 6);
+			}
+			else {
+				if (player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 상단 밖
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 3);
+				hwakin('s', 5);
+				hwakin('s', 6);
+				hwakin('s', 7);
+				hwakin('s', 9);
+			}
+		}
+		else if (player.z == ver - 1) {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 12);
+				hwakin('s', 1);
+				hwakin('s', 3);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 12);
+				hwakin('s', 11);
+				hwakin('s', 9);
+			}
+			else {
+				if (player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 12);
+				hwakin('s', 11);
+				hwakin('s', 9);
+				hwakin('s', 3);
+				hwakin('s', 1);
+
+			}
+		}
+		else {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0) {
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 12);
+				hwakin('s', 1);
+				hwakin('s', 3);
+				hwakin('s', 5);
+				hwakin('s', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+				}
+				hwakin('s', 12);
+				hwakin('s', 11);
+				hwakin('s', 9);
+				hwakin('s', 7);
+				hwakin('s', 6);
+			}
+			else {
+				hwakin('s', 12);
+				hwakin('s', 1);
+				hwakin('s', 3);
+				hwakin('s', 5);
+				hwakin('s', 6);
+				hwakin('s', 7);
+				hwakin('s', 9);
+				hwakin('s', 11);
+			}
+		}
+		break;
+	case 'd':
+		if (player.z == 0) {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0 || player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 좌상단 밖
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 3);
+				hwakin('d', 5);
+				hwakin('d', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200 || player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 우상단 밖
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 9);
+				hwakin('d', 7);
+				hwakin('d', 6);
+			}
+			else {
+				if (player.transZ - player.r + FieldScale * 0.1 <= 0) {		// 맵 상단 밖
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 3);
+				hwakin('d', 5);
+				hwakin('d', 6);
+				hwakin('d', 7);
+				hwakin('d', 9);
+			}
+		}
+		else if (player.z == ver - 1) {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 12);
+				hwakin('d', 1);
+				hwakin('d', 3);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200 || player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 12);
+				hwakin('d', 11);
+				hwakin('d', 9);
+			}
+			else {
+				if (player.transZ + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 12);
+				hwakin('d', 11);
+				hwakin('d', 9);
+				hwakin('d', 3);
+				hwakin('d', 1);
+
+			}
+		}
+		else {
+			if (player.x == 0) {
+				if (player.transX - player.r + FieldScale * 0.1 <= 0) {
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 12);
+				hwakin('d', 1);
+				hwakin('d', 3);
+				hwakin('d', 5);
+				hwakin('d', 6);
+			}
+			else if (player.x == hor - 1) {
+				if (player.transX + player.r + FieldScale * 0.1 >= 200) {
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+				}
+				hwakin('d', 12);
+				hwakin('d', 11);
+				hwakin('d', 9);
+				hwakin('d', 7);
+				hwakin('d', 6);
+			}
+			else {
+				hwakin('d', 12);
+				hwakin('d', 1);
+				hwakin('d', 3);
+				hwakin('d', 5);
+				hwakin('d', 6);
+				hwakin('d', 7);
+				hwakin('d', 9);
+				hwakin('d', 11);
+			}
+		}
+		break;
+	}
+	
+}
+
+GLvoid hwakin(char key, int side) {
+	switch (side) {
+	case 12:
+		if (player.transX + player.r + FieldScale * 0.1 < FieldScale * 0.2 * (player.x + 1) / hor&& player.transX - player.r + FieldScale * 0.1 >= FieldScale * 0.2 * player.x / hor && player.transZ - player.r + FieldScale * 0.1 <= FieldScale * 0.2 * (player.z / ver)) {		// [0][0] -> [0][1]
+			if (field[(int)player.z-1][(int)player.x] != 0) {
+				--player.z;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	case 3:
+		if (player.transX + player.r + FieldScale * 0.1 >= FieldScale * 0.2 * (player.x + 1) / hor && player.transZ + player.r + FieldScale * 0.1 < FieldScale * 0.2 * ((player.z) + 1) / ver&& player.transZ - player.r + FieldScale * 0.1 > FieldScale * 0.2 * (player.z / ver)) {		// [0][0] -> [0][1]
+			if (field[(int)player.z][(int)player.x + 1] != 0) {
+				++player.x;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	case 6:
+		if (player.transX + player.r + FieldScale * 0.1 < FieldScale * 0.2 * (player.x + 1) / hor && player.transX - player.r + FieldScale * 0.1 > FieldScale * 0.2 * player.x / hor && player.transZ + player.r + FieldScale * 0.1 >= FieldScale * 0.2 * ((player.z) + 1) / ver) {		// [0][0] -> [0][1]
+			if (field[(int)player.z + 1][(int)player.x] != 0) {
+				++player.z;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	case 9:
+		if (player.transX - player.r + FieldScale * 0.1 <= FieldScale * 0.2 * player.x / hor && player.transZ + player.r + FieldScale * 0.1 < FieldScale * 0.2 * ((player.z) + 1) / ver&& player.transZ - player.r + FieldScale * 0.1 > FieldScale * 0.2 * (player.z / ver)) {		// [0][0] -> [0][1]
+			if (field[(int)player.z][(int)player.x - 1] != 0) {
+				--player.x;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	case 1:
+		if (player.transX + player.r + FieldScale * 0.1 >= FieldScale * 0.2 * (player.x + 1) / hor && player.transZ - player.r + FieldScale * 0.1 <= FieldScale * 0.2 * (player.z / ver)) {		// [0][0] -> [0][1]
+			if (field[(int)player.z - 1][(int)player.x+1] != 0) {
+				--player.z;
+				++player.x;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	case 5:
+		if (player.transX + player.r + FieldScale * 0.1 >= FieldScale * 0.2 * (player.x + 1) / hor && player.transZ + player.r + FieldScale * 0.1 >= FieldScale * 0.2 * ((player.z+1) / ver)) {		// [0][0] -> [0][1]
+			if (field[(int)player.z + 1][(int)player.x + 1] != 0) {
+				++player.z;
+				++player.x;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	case 7:
+		if (player.transX - player.r + FieldScale * 0.1 <= FieldScale * 0.2 * player.x / hor && player.transZ + player.r + FieldScale * 0.1 >= FieldScale * 0.2 * ((player.z+1) / ver)) {		// [0][0] -> [0][1]
+			if (field[(int)player.z + 1][(int)player.x - 1] != 0) {
+				++player.z;
+				--player.x;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	case 11:
+		if (player.transX - player.r + FieldScale * 0.1 <= FieldScale * 0.2 * player.x / hor && player.transZ - player.r + FieldScale * 0.1 <= FieldScale * 0.2 * (player.z / ver)) {		// [0][0] -> [0][1]
+			if (field[(int)player.z - 1][(int)player.x - 1] != 0) {
+				--player.z;
+				--player.x;
+			}
+			else {
+				switch (key) {
+				case 'w':
+					player.transZ -= glm::cos(glm::radians(player.rotY));
+					player.transX -= glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'a':
+					player.transZ += glm::cos(glm::radians(90 + player.rotY));
+					player.transX -= glm::cos(glm::radians(player.rotY));
+					break;
+				case 's':
+					player.transZ += glm::cos(glm::radians(player.rotY));
+					player.transX += glm::cos(glm::radians(90 + player.rotY));
+					break;
+				case 'd':
+					player.transZ -= glm::cos(glm::radians(90 + player.rotY));
+					player.transX += glm::cos(glm::radians(player.rotY));
+					break;
+				}
+			}
+		}
+		break;
+	}
 }
 
 GLvoid SpecialKey(int key, int x, int y) {
@@ -1027,27 +1888,86 @@ GLvoid SpecialKey(int key, int x, int y) {
 GLvoid Timer(int value) {
 	switch (value) {
 	case 0:												// 장애물 높이 타이머
-		for (int i = 0; i < blockNum; ++i) {
-			if (blocks[i].up) {
-				blocks[i].scaleY += blocks[i].speed;
-			}
-			else {
-				blocks[i].scaleY -= blocks[i].speed;
-			}
-			if (blocks[i].scaleY <= FieldScale / 10 / hor / 2) {
-				blocks[i].up = true;
-			}
-			else if (blocks[i].scaleY >= blocks[i].maxY) {
-				blocks[i].up = false;
+		if (R) {
+			for (int i = 0; i < blockNum; ++i) {
+				if (blocks[i].up) {
+					blocks[i].scaleY += blocks[i].speed;
+				}
+				else {
+					blocks[i].scaleY -= blocks[i].speed;
+				}
+				if (hor <= ver) {
+					if (blocks[i].scaleY <= FieldScale / 10 / hor / 2) {
+						blocks[i].up = true;
+					}
+					else if (blocks[i].scaleY >= blocks[i].maxY) {
+						blocks[i].up = false;
+					}
+				}
+				else {
+					if (blocks[i].scaleY <= FieldScale / 10 / ver / 2) {
+						blocks[i].up = true;
+					}
+					else if (blocks[i].scaleY >= blocks[i].maxY) {
+						blocks[i].up = false;
+					}
+				}
 			}
 		}
-		glutTimerFunc(10, Timer, 0);
+		else {
+			for (int i = 0; i < hor * ver; ++i) {
+				if (mountains[i].up) {
+					mountains[i].scaleY += mountains[i].speed;
+				}
+				else {
+					mountains[i].scaleY -= mountains[i].speed;
+				}
+
+				if (hor <= ver) {
+					if (mountains[i].scaleY <= FieldScale / 10 / hor / 2) {
+						mountains[i].up = true;
+					}
+					else if (mountains[i].scaleY >= mountains[i].maxY) {
+						mountains[i].up = false;
+					}
+				}
+				else {
+					if (mountains[i].scaleY <= FieldScale / 10 / ver / 2) {
+						mountains[i].up = true;
+					}
+					else if (mountains[i].scaleY >= mountains[i].maxY) {
+						mountains[i].up = false;
+					}
+				}
+			}
+		}
+		if (V) {
+			glutTimerFunc(10, Timer, 0);
+		}
 		break;
+	case 'y':
+		Map.camRot += 1;
+		glutTimerFunc(10, Timer, 'y');
+		break;
+	case 'Y':
+		Map.camRot -= 1;
+		glutTimerFunc(10, Timer, 'Y');
+		break;
+	case 'x':
+		Map.atRot += 1;
+		glutTimerFunc(10, Timer, 'x');
+		break;
+	case 'X':
+		Map.atRot -= 1;
+		glutTimerFunc(10, Timer, 'X');
 	}
 	glutPostRedisplay();
 }
 
 GLvoid MouseMove(int x, int y) {
+	player.rotY = (x - WinX / 2) * 3 / 5;
+	player.rotX = -(y - WinY / 2) * 3 / 10;
+	//std::cout << "(" << player.rotY << ", " << player.rotX << ")" << std::endl;
 	glutPostRedisplay();
 }
 // 버텍스 셰이더 코드 - 위치
@@ -1199,25 +2119,59 @@ GLvoid InitBuffer() {
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, player.faceNum * 3 * sizeof(unsigned int), player.vertexFace, GL_STATIC_DRAW);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
 	//-------------------------------------------------------------------------------------------------------
-	for (int i = 0; i < blockNum; ++i) {
-		glGenVertexArrays(1, &blocks[i].VAO);
-		glBindVertexArray(blocks[i].VAO);
+	if (R) {
+		for (int i = 0; i < blockNum; ++i) {
+			glGenVertexArrays(1, &blocks[i].VAO);
+			glBindVertexArray(blocks[i].VAO);
 
-		glGenBuffers(1, &blocks[i].Color);
-		glBindBuffer(GL_ARRAY_BUFFER, blocks[i].Color);
-		glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexColor, GL_STATIC_DRAW);
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-		glEnableVertexAttribArray(1);
+			glGenBuffers(1, &blocks[i].Color);
+			glBindBuffer(GL_ARRAY_BUFFER, blocks[i].Color);
+			glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexColor, GL_STATIC_DRAW);
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+			glEnableVertexAttribArray(1);
 
-		glGenBuffers(1, &blocks[i].VBO);
-		glBindBuffer(GL_ARRAY_BUFFER, blocks[i].VBO);
-		glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexData, GL_STATIC_DRAW);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-		glEnableVertexAttribArray(0);
+			glGenBuffers(1, &blocks[i].VBO);
+			glBindBuffer(GL_ARRAY_BUFFER, blocks[i].VBO);
+			glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexData, GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+			glEnableVertexAttribArray(0);
 
-		glGenBuffers(1, &blocks[i].EBO);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, blocks[i].EBO);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, blocks[i].faceNum * 3 * sizeof(unsigned int), blocks[i].vertexFace, GL_STATIC_DRAW);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
+			glGenBuffers(1, &blocks[i].EBO);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, blocks[i].EBO);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, blocks[i].faceNum * 3 * sizeof(unsigned int), blocks[i].vertexFace, GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
+		}
+	}
+	else {
+		mountains = new structure[hor * ver];
+		int i = 0;
+		for (int z = 0; z < ver; ++z) {
+			for (int x = 0; x < hor; ++x) {
+				mountains[i].z = z;
+				mountains[i].x = x;
+				i++;
+			}
+		}
+		for (int i = 0; i < hor * ver; ++i) {
+			glGenVertexArrays(1, &mountains[i].VAO);
+			glBindVertexArray(mountains[i].VAO);
+
+			glGenBuffers(1, &mountains[i].Color);
+			glBindBuffer(GL_ARRAY_BUFFER, mountains[i].Color);
+			glBufferData(GL_ARRAY_BUFFER, mountains[i].vertexNum * 3 * sizeof(float), mountains[i].vertexColor, GL_STATIC_DRAW);
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+			glEnableVertexAttribArray(1);
+
+			glGenBuffers(1, &mountains[i].VBO);
+			glBindBuffer(GL_ARRAY_BUFFER, mountains[i].VBO);
+			glBufferData(GL_ARRAY_BUFFER, mountains[i].vertexNum * 3 * sizeof(float), mountains[i].vertexData, GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+			glEnableVertexAttribArray(0);
+
+			glGenBuffers(1, &mountains[i].EBO);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mountains[i].EBO);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, mountains[i].faceNum * 3 * sizeof(unsigned int), mountains[i].vertexFace, GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
+		}
 	}
 }
