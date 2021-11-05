@@ -15,17 +15,19 @@
 
 #define WinX 600
 #define WinY 600
+#define FieldScale 1000
 GLvoid drawScene(GLvoid);
 GLvoid Reshape(int w, int h);
 GLvoid Keyboard(unsigned char key, int x, int y);
 GLvoid Timer(int value);
 GLvoid MouseMove(int x, int y);
-GLvoid setAnswer();
+GLvoid setroute();
 
 void make_vertexShaders();
 void make_fragmentShaders();
 GLuint make_shaderProgram();
 GLvoid InitBuffer();
+GLvoid SpecialKey(int key, int x, int y);
 
 std::random_device rd;
 std::default_random_engine dre(rd());
@@ -46,7 +48,7 @@ public:
 	float* vertexColor;
 	unsigned int* vertexFace;
 	glm::mat4 trans{ 1.0f };
-	float rotX{}, rotY{}, rotZ{}, transX{}, transY{}, transZ{}, scaleX{ 1.0f }, scaleY{ 1.0f }, scaleZ{ 1.0f }, speed;
+	float rotX{}, rotY{}, rotZ{}, transX{}, transY{}, transZ{}, scaleX{ 1.0f }, scaleY{ 1.0f }, scaleZ{ 1.0f }, speed, x, z;
 	int head{};
 	structure(const char* FileName, float R, float G, float B) {
 		VAO = VBO = EBO = vertexNum = faceNum = 0;
@@ -77,6 +79,47 @@ public:
 				vertexColor[vertIndex++] = R;
 				vertexColor[vertIndex++] = G;
 				vertexColor[vertIndex++] = B;
+			}
+			else if (count[0] == 'f' && count[1] == '\0') {
+				fscanf(objFile, "%d %d %d", &vertexFace[faceIndex], &vertexFace[faceIndex + 1], &vertexFace[faceIndex + 2]);
+				--vertexFace[faceIndex++];
+				--vertexFace[faceIndex++];
+				--vertexFace[faceIndex++];
+			}
+			memset(count, '\0', sizeof(count)); // 배열 초기화
+		}
+		fclose(objFile);
+	}
+
+	structure() {
+		VAO = VBO = EBO = vertexNum = faceNum = 0;
+		//--- 1. 전체 버텍스 개수 및 삼각형 개수 세기
+		FILE* objFile = fopen("Box.obj", "r");
+		char count[100];
+		while (!feof(objFile)) {
+			fscanf(objFile, "%s", count);
+			if (count[0] == 'v' && count[1] == '\0')
+				vertexNum += 1;
+			else if (count[0] == 'f' && count[1] == '\0')
+				faceNum += 1;
+			memset(count, '\0', sizeof(count)); // 배열 초기화
+		}
+		//--- 2. 메모리 할당
+		vertexData = new float[vertexNum * 3];
+		vertexFace = new unsigned int[faceNum * 3];
+		vertexColor = new float[vertexNum * 3];
+		int vertIndex = 0;
+		int faceIndex = 0;
+		fseek(objFile, 0, SEEK_SET);
+		//--- 3. 할당된 메모리에 각 버텍스, 페이스 정보 입력
+
+		while (!feof(objFile)) {
+			fscanf(objFile, "%s", count);
+			if (count[0] == 'v' && count[1] == '\0') {
+				fscanf(objFile, "%f %f %f", &vertexData[vertIndex], &vertexData[vertIndex + 1], &vertexData[vertIndex + 2]);
+				vertexColor[vertIndex++] = 0.2;
+				vertexColor[vertIndex++] = 0.2;
+				vertexColor[vertIndex++] = 0.2;
 			}
 			else if (count[0] == 'f' && count[1] == '\0') {
 				fscanf(objFile, "%d %d %d", &vertexFace[faceIndex], &vertexFace[faceIndex + 1], &vertexFace[faceIndex + 2]);
@@ -165,12 +208,18 @@ public:
 };
 
 int** field;
-int** answer;
+int** route;
 int hor, ver;
 int blockNum;
 structure bottom("Plane.obj", 0, 0, 0);
-Cam c(0, 0, 0.5, glm::vec3(0, 1, 0));
-
+structure start("Plane.obj", 1, 0.3, 1);
+structure finish("Plane.obj", 0, 1, 0);
+structure player("sphere.obj", 1, 0, 0);
+structure* blocks;
+Cam top(0, 300, 0, glm::vec3(0, 0, -1));
+Cam FPP(-50, 0, -50, glm::vec3(0, 1, 0));
+Cam TPP(-50, 0, -50, glm::vec3(0, 1, 0));
+Cam Map(0, 100, -300, glm::vec3(0, 1, 0));
 void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 {
 	//--- 윈도우 생성하기
@@ -189,7 +238,6 @@ void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 	}
 	else
 		std::cout << "GLEW Initialized\n";
-	InitBuffer();
 	glFrontFace(GL_CCW);
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
@@ -198,19 +246,25 @@ void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 	glutReshapeFunc(Reshape);									// 다시 그리기 콜백함수 지정
 	glutKeyboardFunc(Keyboard);									// 키보드 입력 콜백함수 지정
 	glutMotionFunc(MouseMove);
-	std::cout << "가로, 세로 : ";
-	std::cin >> hor >> ver;
+	glutSpecialFunc(SpecialKey);
+	for (int i = 0; i < 1; ++i) {
+		std::cout << "가로, 세로 : ";
+		std::cin >> hor >> ver;
+		//if (hor < 5 || ver < 5) {
+		//	std::cout << "최소 6 이상을 입력하셔야 합니다." << std::endl;
+		//	i--;
+		//}
+	}
 	field = new int* [ver];
-	answer = new int* [ver];
+	route = new int* [ver];
 	for (int i = 0; i < hor; ++i) {
 		field[i] = new int[hor];
-		answer[i] = new int[hor];
+		route[i] = new int[hor];
 	}
-	setAnswer();
-
+	setroute();
+	InitBuffer();
 	glutMainLoop();												// 이벤트 처리 시작
 }
-
 typedef struct way {
 	way* next;
 	way* previous;
@@ -219,11 +273,11 @@ typedef struct way {
 	int cnt;
 };
 
-GLvoid setAnswer() {
+GLvoid setroute() {
 	for (int z = 0; z < ver; ++z) {
 		for (int x = 0; x < hor; ++x) {
 			field[z][x] = 0;
-			answer[z][x] = 0;
+			route[z][x] = 0;
 		}
 	}	// 0으로 초기화
 	way* first = new way;
@@ -234,13 +288,13 @@ GLvoid setAnswer() {
 	way* now = first;
 	int head = 0;
 	int maxcnt = 1;
-	answer[first->zPos][first->xPos] = 1;
+	route[first->zPos][first->xPos] = 1;
 	field[first->zPos][first->xPos] = 1;
 
 	while (!(now->zPos == ver - 1 && now->xPos == hor - 1)) {
 		if (now->zPos == 0) {
 			if (now->xPos == 0) {		// 볼 곳이 두군데
-				if (answer[now->zPos][now->xPos + 1] == 1 && answer[now->zPos + 1][now->xPos] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos][now->xPos + 1] == 1 && route[now->zPos + 1][now->xPos] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -248,10 +302,10 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos][now->xPos + 1] == 0) {
+					if (route[now->zPos][now->xPos + 1] == 0) {
 						cango[1] = 1;
 					}
-					if (answer[now->zPos + 1][now->xPos] == 0) {
+					if (route[now->zPos + 1][now->xPos] == 0) {
 						cango[2] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -261,7 +315,7 @@ GLvoid setAnswer() {
 					}
 					switch (head) {
 					case 1:
-						if (answer[now->zPos][now->xPos + 1] != 1) {
+						if (route[now->zPos][now->xPos + 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos + 1;
 							newly->zPos = now->zPos;
@@ -269,12 +323,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 2:
-						if (answer[now->zPos + 1][now->xPos] != 1) {
+						if (route[now->zPos + 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos + 1;
@@ -282,7 +336,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -290,7 +344,7 @@ GLvoid setAnswer() {
 				}
 			}
 			else if (now->xPos == hor - 1) { // 볼 곳이 두군데
-				if (answer[now->zPos + 1][now->xPos] == 1 && answer[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos + 1][now->xPos] == 1 && route[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -298,10 +352,10 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos + 1][now->xPos] == 0) {
+					if (route[now->zPos + 1][now->xPos] == 0) {
 						cango[2] = 1;
 					}
-					if (answer[now->zPos][now->xPos - 1] == 0) {
+					if (route[now->zPos][now->xPos - 1] == 0) {
 						cango[3] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -311,7 +365,7 @@ GLvoid setAnswer() {
 					}
 					switch (head) {
 					case 2:
-						if (answer[now->zPos + 1][now->xPos] != 1) {
+						if (route[now->zPos + 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos + 1;
@@ -319,12 +373,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 3:
-						if (answer[now->zPos][now->xPos - 1] != 1) {
+						if (route[now->zPos][now->xPos - 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos - 1;
 							newly->zPos = now->zPos;
@@ -332,7 +386,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -340,7 +394,7 @@ GLvoid setAnswer() {
 				}
 			}
 			else {								// 볼 곳이 세군데
-				if (answer[now->zPos][now->xPos + 1] == 1 && answer[now->zPos + 1][now->xPos] == 1 && answer[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos][now->xPos + 1] == 1 && route[now->zPos + 1][now->xPos] == 1 && route[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -348,13 +402,13 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos][now->xPos + 1] == 0) {
+					if (route[now->zPos][now->xPos + 1] == 0) {
 						cango[1] = 1;
 					}
-					if (answer[now->zPos + 1][now->xPos] == 0) {
+					if (route[now->zPos + 1][now->xPos] == 0) {
 						cango[2] = 1;
 					}
-					if (answer[now->zPos][now->xPos - 1] == 0) {
+					if (route[now->zPos][now->xPos - 1] == 0) {
 						cango[3] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -364,7 +418,7 @@ GLvoid setAnswer() {
 					}
 					switch (head) {
 					case 1:
-						if (answer[now->zPos][now->xPos + 1] != 1) {
+						if (route[now->zPos][now->xPos + 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos + 1;
 							newly->zPos = now->zPos;
@@ -372,12 +426,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 2:
-						if (answer[now->zPos + 1][now->xPos] != 1) {
+						if (route[now->zPos + 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos + 1;
@@ -385,12 +439,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 3:
-						if (answer[now->zPos][now->xPos - 1] != 1) {
+						if (route[now->zPos][now->xPos - 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos - 1;
 							newly->zPos = now->zPos;
@@ -398,7 +452,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -408,7 +462,7 @@ GLvoid setAnswer() {
 		}
 		else if (now->zPos == ver - 1) {
 			if (now->xPos == 0) {		// 볼 곳이 두군데
-				if (answer[now->zPos - 1][now->xPos] == 1 && answer[now->zPos][now->xPos + 1] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos - 1][now->xPos] == 1 && route[now->zPos][now->xPos + 1] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -416,10 +470,10 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos - 1][now->xPos] == 0) {
+					if (route[now->zPos - 1][now->xPos] == 0) {
 						cango[0] = 1;
 					}
-					if (answer[now->zPos][now->xPos + 1] == 0) {
+					if (route[now->zPos][now->xPos + 1] == 0) {
 						cango[1] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -429,7 +483,7 @@ GLvoid setAnswer() {
 					}
 					switch (head) {
 					case 0:
-						if (answer[now->zPos - 1][now->xPos] != 1) {
+						if (route[now->zPos - 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos - 1;
@@ -437,12 +491,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 1:
-						if (answer[now->zPos][now->xPos + 1] != 1) {
+						if (route[now->zPos][now->xPos + 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos + 1;
 							newly->zPos = now->zPos;
@@ -450,7 +504,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -458,7 +512,7 @@ GLvoid setAnswer() {
 				}
 			}
 			else {// 볼 곳이 세군데
-				if (answer[now->zPos - 1][now->xPos] == 1 && answer[now->zPos][now->xPos + 1] == 1 && answer[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos - 1][now->xPos] == 1 && route[now->zPos][now->xPos + 1] == 1 && route[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -466,13 +520,13 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos - 1][now->xPos] == 0) {
+					if (route[now->zPos - 1][now->xPos] == 0) {
 						cango[0] = 1;
 					}
-					if (answer[now->zPos][now->xPos + 1] == 0) {
+					if (route[now->zPos][now->xPos + 1] == 0) {
 						cango[1] = 1;
 					}
-					if (answer[now->zPos][now->xPos - 1] == 0) {
+					if (route[now->zPos][now->xPos - 1] == 0) {
 						cango[3] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -482,7 +536,7 @@ GLvoid setAnswer() {
 					}
 					switch (head) {
 					case 0:
-						if (answer[now->zPos - 1][now->xPos] != 1) {
+						if (route[now->zPos - 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos - 1;
@@ -490,12 +544,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 1:
-						if (answer[now->zPos][now->xPos + 1] != 1) {
+						if (route[now->zPos][now->xPos + 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos + 1;
 							newly->zPos = now->zPos;
@@ -503,12 +557,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 3:
-						if (answer[now->zPos][now->xPos - 1] != 1) {
+						if (route[now->zPos][now->xPos - 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos - 1;
 							newly->zPos = now->zPos;
@@ -516,7 +570,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -526,7 +580,7 @@ GLvoid setAnswer() {
 		}
 		else {
 			if (now->xPos == 0) {		// 볼 곳이 세군데
-				if (answer[now->zPos - 1][now->xPos] == 1 && answer[now->zPos][now->xPos + 1] == 1 && answer[now->zPos + 1][now->xPos] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos - 1][now->xPos] == 1 && route[now->zPos][now->xPos + 1] == 1 && route[now->zPos + 1][now->xPos] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -534,13 +588,13 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos - 1][now->xPos] == 0) {
+					if (route[now->zPos - 1][now->xPos] == 0) {
 						cango[0] = 1;
 					}
-					if (answer[now->zPos][now->xPos + 1] == 0) {
+					if (route[now->zPos][now->xPos + 1] == 0) {
 						cango[1] = 1;
 					}
-					if (answer[now->zPos + 1][now->xPos] == 0) {
+					if (route[now->zPos + 1][now->xPos] == 0) {
 						cango[2] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -550,7 +604,7 @@ GLvoid setAnswer() {
 					}
 					switch (head) {
 					case 0:
-						if (answer[now->zPos - 1][now->xPos] != 1) {
+						if (route[now->zPos - 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos - 1;
@@ -558,12 +612,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 1:
-						if (answer[now->zPos][now->xPos + 1] != 1) {
+						if (route[now->zPos][now->xPos + 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos + 1;
 							newly->zPos = now->zPos;
@@ -571,12 +625,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 2:
-						if (answer[now->zPos + 1][now->xPos] != 1) {
+						if (route[now->zPos + 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos + 1;
@@ -584,7 +638,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -592,7 +646,7 @@ GLvoid setAnswer() {
 				}
 			}
 			else if (now->xPos == hor - 1) {
-				if (answer[now->zPos - 1][now->xPos] == 1 && answer[now->zPos + 1][now->xPos] == 1 && answer[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos - 1][now->xPos] == 1 && route[now->zPos + 1][now->xPos] == 1 && route[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -600,13 +654,13 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos - 1][now->xPos] == 0) {
+					if (route[now->zPos - 1][now->xPos] == 0) {
 						cango[0] = 1;
 					}
-					if (answer[now->zPos + 1][now->xPos] == 0) {
+					if (route[now->zPos + 1][now->xPos] == 0) {
 						cango[2] = 1;
 					}
-					if (answer[now->zPos][now->xPos - 1] == 0) {
+					if (route[now->zPos][now->xPos - 1] == 0) {
 						cango[3] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -616,7 +670,7 @@ GLvoid setAnswer() {
 					}
 					switch (head) {
 					case 0:
-						if (answer[now->zPos - 1][now->xPos] != 1) {
+						if (route[now->zPos - 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos - 1;
@@ -624,12 +678,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 2:
-						if (answer[now->zPos + 1][now->xPos] != 1) {
+						if (route[now->zPos + 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos + 1;
@@ -637,12 +691,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 3:
-						if (answer[now->zPos][now->xPos - 1] != 1) {
+						if (route[now->zPos][now->xPos - 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos - 1;
 							newly->zPos = now->zPos;
@@ -650,7 +704,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -658,7 +712,7 @@ GLvoid setAnswer() {
 				}
 			}
 			else {				// 가운데
-				if (answer[now->zPos - 1][now->xPos] == 1 && answer[now->zPos][now->xPos + 1] == 1 && answer[now->zPos + 1][now->xPos] == 1 && answer[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
+				if (route[now->zPos - 1][now->xPos] == 1 && route[now->zPos][now->xPos + 1] == 1 && route[now->zPos + 1][now->xPos] == 1 && route[now->zPos][now->xPos - 1] == 1) { // 사방이 다 막혀있으면
 					field[now->zPos][now->xPos] = 0;
 					now = now->previous;
 					maxcnt--;
@@ -666,16 +720,16 @@ GLvoid setAnswer() {
 				}
 				else {
 					int cango[4] = {};
-					if (answer[now->zPos - 1][now->xPos] == 0) {
+					if (route[now->zPos - 1][now->xPos] == 0) {
 						cango[0] = 1;
 					}
-					if (answer[now->zPos][now->xPos + 1] == 0) {
+					if (route[now->zPos][now->xPos + 1] == 0) {
 						cango[1] = 1;
 					}
-					if (answer[now->zPos + 1][now->xPos] == 0) {
+					if (route[now->zPos + 1][now->xPos] == 0) {
 						cango[2] = 1;
 					}
-					if (answer[now->zPos][now->xPos - 1] == 0) {
+					if (route[now->zPos][now->xPos - 1] == 0) {
 						cango[3] = 1;
 					}
 					for (int i = 0; i < 1; ++i) {			// 갈 수 있는 곳중에 한 곳 선택하고
@@ -686,7 +740,7 @@ GLvoid setAnswer() {
 					head = uid(dre);
 					switch (head) {
 					case 0:
-						if (answer[now->zPos - 1][now->xPos] != 1) {
+						if (route[now->zPos - 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos - 1;
@@ -694,12 +748,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 1:
-						if (answer[now->zPos][now->xPos + 1] != 1) {
+						if (route[now->zPos][now->xPos + 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos + 1;
 							newly->zPos = now->zPos;
@@ -707,12 +761,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 2:
-						if (answer[now->zPos + 1][now->xPos] != 1) {
+						if (route[now->zPos + 1][now->xPos] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos;
 							newly->zPos = now->zPos + 1;
@@ -720,12 +774,12 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
 					case 3:
-						if (answer[now->zPos][now->xPos - 1] != 1) {
+						if (route[now->zPos][now->xPos - 1] != 1) {
 							way* newly = new way;
 							newly->xPos = now->xPos - 1;
 							newly->zPos = now->zPos;
@@ -733,7 +787,7 @@ GLvoid setAnswer() {
 							newly->previous = now;
 							now->next = newly;
 							now = newly;
-							answer[newly->zPos][newly->xPos] = 1;
+							route[newly->zPos][newly->xPos] = 1;
 							field[newly->zPos][newly->xPos] = newly->cnt;
 						}
 						break;
@@ -743,6 +797,7 @@ GLvoid setAnswer() {
 		}
 	}
 	now->next = NULL;
+
 	std::cout << "Field" << std::endl;
 	for (int z = 0; z < ver; ++z) {
 		for (int x = 0; x < hor; ++x) {
@@ -753,16 +808,26 @@ GLvoid setAnswer() {
 		}
 		std::cout << std::endl;
 	}
-	std::cout << "--------------------------------------------------------------------------------------------" << std::endl;
-	std::cout << "Answer" << std::endl;
+	blocks = new structure[blockNum];
+	int i = 0;
 	for (int z = 0; z < ver; ++z) {
 		for (int x = 0; x < hor; ++x) {
-			std::cout << answer[z][x] << "\t";
+			if (field[z][x] == 0) {
+				blocks[i].z = z;
+				blocks[i].x = x;
+				i++;
+			}
+		}
+	}
+	std::cout << "--------------------------------------------------------------------------------------------" << std::endl;
+	std::cout << "route" << std::endl;
+	for (int z = 0; z < ver; ++z) {
+		for (int x = 0; x < hor; ++x) {
+			std::cout << route[z][x] << "\t";
 		}
 		std::cout << std::endl;
 	}
 }
-
 GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 {
 	glUseProgram(shaderProgram);
@@ -770,21 +835,118 @@ GLvoid drawScene()												//--- 콜백 함수: 그리기 콜백 함수
 	glClearColor(RED, GREEN, BLUE, 1.0f);											// 바탕색을 변경
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);		// 설정된 색으로 전체를 칠하기
 
+	glViewport(WinX * 4 / 5, WinY * 4 / 5, WinX / 5, WinY / 5);
 	glm::mat4 Model(1.0f);
 	int ModelLoc = glGetUniformLocation(shaderProgram, "ModelTransform");
 	glUniformMatrix4fv(ModelLoc, 1, GL_FALSE, glm::value_ptr(Model));
 
 	glm::mat4 View(1.0f);
-	View = glm::lookAt(c.camPos, c.camAt, c.camUp);
-	View = glm::rotate(View, glm::radians(c.camRot), glm::vec3(0, 1, 0));			// Y 축 기준으로 돌리기 공전
+	View = glm::lookAt(top.camPos, top.camAt, top.camUp);
+	View = glm::rotate(View, glm::radians(top.camRot), glm::vec3(0, 1, 0));			// Y 축 기준으로 돌리기 공전
 	int ViewLoc = glGetUniformLocation(shaderProgram, "ViewTransform");
 	glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
 
 	glm::mat4 Proj(1.0f);
 	int ProjLoc = glGetUniformLocation(shaderProgram, "ProjectionTransform");
-	Proj = glm::perspective(glm::radians(45.0f), (float)WinX / (float)WinY, 1.5f, 5.0f);
-	Proj = glm::translate(Proj, glm::vec3(0.0, 0.0, -2.0));
+	Proj = glm::ortho(-100.f, 100.f, -100.f, 100.f, 0.f, 301.f);
 	glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
+
+	bottom.Scale(FieldScale, 0, FieldScale);
+	glBindVertexArray(bottom.VAO);
+	glDrawElements(GL_TRIANGLES, bottom.faceNum * 3, GL_UNSIGNED_INT, 0);
+	bottom.transReset();
+	
+	start.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), 0.01, -(FieldScale / 10 - FieldScale / 10 / ver));
+	start.Scale(FieldScale / hor, 0, FieldScale / ver);
+	glBindVertexArray(start.VAO);
+	glDrawElements(GL_TRIANGLES, start.faceNum * 3, GL_UNSIGNED_INT, 0);
+	start.transReset();
+
+	finish.Translate(FieldScale / 10 - FieldScale / 10 / hor, 0.01, FieldScale / 10 - FieldScale / 10 / ver);
+	finish.Scale(FieldScale / hor, 0, FieldScale / ver);
+	glBindVertexArray(finish.VAO);
+	glDrawElements(GL_TRIANGLES, finish.faceNum * 3, GL_UNSIGNED_INT, 0);
+	finish.transReset();
+
+	for (int i = 0; i < blockNum; ++i) {
+		blocks[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
+		blocks[i].Translate(FieldScale * 2 / 10 * blocks[i].x / hor, 0, FieldScale * 2 / 10 * blocks[i].z / ver);
+		blocks[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
+		blocks[i].Scale(FieldScale / hor, 0, FieldScale / ver);
+		glBindVertexArray(blocks[i].VAO);
+		glDrawElements(GL_TRIANGLES, blocks[i].faceNum * 3, GL_UNSIGNED_INT, 0);
+		blocks[i].transReset();
+
+	}
+	if (hor < ver) {
+		player.Translate(player.transX, 0, player.transZ);
+		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale/10 / hor / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
+		player.Scale(FieldScale / hor / 2, FieldScale / hor / 2, FieldScale / hor / 2);
+
+	}
+	else {
+		player.Translate(player.transX, 0, player.transZ);
+		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale/10 / ver / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
+		player.Scale(FieldScale / ver / 2, FieldScale / ver / 2, FieldScale / ver / 2);
+	}
+	glBindVertexArray(player.VAO);
+	glDrawElements(GL_TRIANGLES, player.faceNum * 3, GL_UNSIGNED_INT, 0);
+	player.transReset();
+	//---------------------------------------------------------------------------------------------------------------
+	glViewport(0, 0, WinX, WinY);
+	Model = glm::mat4(1.0f);
+	glUniformMatrix4fv(ModelLoc, 1, GL_FALSE, glm::value_ptr(Model));
+
+	View= glm::mat4(1.0f);
+	View = glm::lookAt(Map.camPos, Map.camAt, Map.camUp);
+	View = glm::rotate(View, glm::radians(Map.camRot), glm::vec3(0, 1, 0));			// Y 축 기준으로 돌리기 공전
+	glUniformMatrix4fv(ViewLoc, 1, GL_FALSE, glm::value_ptr(View));
+
+	Proj= glm::mat4(1.0f);
+	Proj = glm::perspective(glm::radians(45.0f), (float)WinX / (float)WinY, 1.5f, 1000.f);
+	glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, glm::value_ptr(Proj));
+
+	bottom.Scale(FieldScale, 0, FieldScale);
+	glBindVertexArray(bottom.VAO);
+	glDrawElements(GL_TRIANGLES, bottom.faceNum * 3, GL_UNSIGNED_INT, 0);
+	bottom.transReset();
+
+	start.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), 0.01, -(FieldScale / 10 - FieldScale / 10 / ver));
+	start.Scale(FieldScale / hor, 0, FieldScale / ver);
+	glBindVertexArray(start.VAO);
+	glDrawElements(GL_TRIANGLES, start.faceNum * 3, GL_UNSIGNED_INT, 0);
+	start.transReset();
+
+	finish.Translate(FieldScale / 10 - FieldScale / 10 / hor, 0.01, FieldScale / 10 - FieldScale / 10 / ver);
+	finish.Scale(FieldScale / hor, 0, FieldScale / ver);
+	glBindVertexArray(finish.VAO);
+	glDrawElements(GL_TRIANGLES, finish.faceNum * 3, GL_UNSIGNED_INT, 0);
+	finish.transReset();
+
+	for (int i = 0; i < blockNum; ++i) {
+		blocks[i].Translate(-FieldScale / 10, 0, -FieldScale / 10);
+		blocks[i].Translate(FieldScale * 2 / 10 * blocks[i].x / hor, 0, FieldScale * 2 / 10 * blocks[i].z / ver);
+		blocks[i].Translate(FieldScale / 10 / hor, 0.1, FieldScale / 10 / ver);
+		blocks[i].Scale(FieldScale / hor, blocks[i].scaleY, FieldScale / ver);
+		glBindVertexArray(blocks[i].VAO);
+		glDrawElements(GL_TRIANGLES, blocks[i].faceNum * 3, GL_UNSIGNED_INT, 0);
+		blocks[i].transReset();
+
+	}
+	if (hor < ver) {
+		player.Translate(player.transX, 0, player.transZ);
+		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale / 10 / hor / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
+		player.Scale(FieldScale / hor / 2, FieldScale / hor / 2, FieldScale / hor / 2);
+
+	}
+	else {
+		player.Translate(player.transX, 0, player.transZ);
+		player.Translate(-(FieldScale / 10 - FieldScale / 10 / hor), FieldScale / 10 / ver / 2, -(FieldScale / 10 - FieldScale / 10 / ver));
+		player.Scale(FieldScale / ver / 2, FieldScale / ver / 2, FieldScale / ver / 2);
+	}
+	glBindVertexArray(player.VAO);
+	glDrawElements(GL_TRIANGLES, player.faceNum * 3, GL_UNSIGNED_INT, 0);
+	player.transReset();
 	glutSwapBuffers();											// 화면에 출력하기
 }
 GLvoid Reshape(int w, int h)									//--- 콜백 함수: 다시 그리기 콜백 함수
@@ -799,11 +961,27 @@ GLvoid Keyboard(unsigned char key, int x, int y)
 	case 'Q':
 		for (int i = 0; i < hor; ++i) {
 			delete[] field[i];
-			delete[] answer[i];
+			delete[] route[i];
 		}
 		delete[] field;
-		delete[] answer;
+		delete[] route;
 		glutDestroyWindow(WindowID);
+		break;
+	case 'w':
+	case 'W':
+		player.transZ += 1;
+		break;
+	case 'a':
+	case 'A':
+		player.transX += 1;
+		break;
+	case 's':
+	case 'S':
+		player.transZ -= 1;
+		break;
+	case 'd':
+	case 'D':
+		player.transX -= 1;
 		break;
 	}
 	glutPostRedisplay();
@@ -812,10 +990,10 @@ GLvoid Keyboard(unsigned char key, int x, int y)
 GLvoid SpecialKey(int key, int x, int y) {
 	switch (key) {
 	case GLUT_KEY_LEFT:
-		c.camRot -= 4;
+		Map.camRot -= 4;
 		break;
 	case GLUT_KEY_RIGHT:
-		c.camRot += 4;
+		Map.camRot += 4;
 		break;
 	}
 	glutPostRedisplay();
@@ -917,26 +1095,85 @@ GLvoid InitBuffer() {
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, bottom.faceNum * 3 * sizeof(unsigned int), bottom.vertexFace, GL_STATIC_DRAW);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
 	//-------------------------------------------------------------------------------------------------------
+	glGenVertexArrays(1, &start.VAO);
+	glBindVertexArray(start.VAO);
 
-	/*for (int i = 0; i < ballNum; ++i) {
-		glGenVertexArrays(1, &balls[i].VAO);
-		glBindVertexArray(balls[i].VAO);
+	glGenBuffers(1, &start.Color);
+	glBindBuffer(GL_ARRAY_BUFFER, start.Color);
+	glBufferData(GL_ARRAY_BUFFER, start.vertexNum * 3 * sizeof(float), start.vertexColor, GL_STATIC_DRAW);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(1);
 
-		glGenBuffers(1, &balls[i].Color);
-		glBindBuffer(GL_ARRAY_BUFFER, balls[i].Color);
-		glBufferData(GL_ARRAY_BUFFER, balls[i].vertexNum * 3 * sizeof(float), balls[i].vertexColor, GL_STATIC_DRAW);
+	glGenBuffers(1, &start.VBO);
+	glBindBuffer(GL_ARRAY_BUFFER, start.VBO);
+	glBufferData(GL_ARRAY_BUFFER, start.vertexNum * 3 * sizeof(float), start.vertexData, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+
+	glGenBuffers(1, &start.EBO);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, start.EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, start.faceNum * 3 * sizeof(unsigned int), start.vertexFace, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
+	//-------------------------------------------------------------------------------------------------------
+	glGenVertexArrays(1, &finish.VAO);
+	glBindVertexArray(finish.VAO);
+
+	glGenBuffers(1, &finish.Color);
+	glBindBuffer(GL_ARRAY_BUFFER, finish.Color);
+	glBufferData(GL_ARRAY_BUFFER, finish.vertexNum * 3 * sizeof(float), finish.vertexColor, GL_STATIC_DRAW);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(1);
+
+	glGenBuffers(1, &finish.VBO);
+	glBindBuffer(GL_ARRAY_BUFFER, finish.VBO);
+	glBufferData(GL_ARRAY_BUFFER, finish.vertexNum * 3 * sizeof(float), finish.vertexData, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+
+	glGenBuffers(1, &finish.EBO);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, finish.EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, finish.faceNum * 3 * sizeof(unsigned int), finish.vertexFace, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
+	//-------------------------------------------------------------------------------------------------------
+	glGenVertexArrays(1, &player.VAO);
+	glBindVertexArray(player.VAO);
+
+	glGenBuffers(1, &player.Color);
+	glBindBuffer(GL_ARRAY_BUFFER, player.Color);
+	glBufferData(GL_ARRAY_BUFFER, player.vertexNum * 3 * sizeof(float), player.vertexColor, GL_STATIC_DRAW);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(1);
+
+	glGenBuffers(1, &player.VBO);
+	glBindBuffer(GL_ARRAY_BUFFER, player.VBO);
+	glBufferData(GL_ARRAY_BUFFER, player.vertexNum * 3 * sizeof(float), player.vertexData, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+
+	glGenBuffers(1, &player.EBO);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, player.EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, player.faceNum * 3 * sizeof(unsigned int), player.vertexFace, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
+	//-------------------------------------------------------------------------------------------------------
+	for (int i = 0; i < blockNum; ++i) {
+		glGenVertexArrays(1, &blocks[i].VAO);
+		glBindVertexArray(blocks[i].VAO);
+
+		glGenBuffers(1, &blocks[i].Color);
+		glBindBuffer(GL_ARRAY_BUFFER, blocks[i].Color);
+		glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexColor, GL_STATIC_DRAW);
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
 		glEnableVertexAttribArray(1);
 
-		glGenBuffers(1, &balls[i].VBO);
-		glBindBuffer(GL_ARRAY_BUFFER, balls[i].VBO);
-		glBufferData(GL_ARRAY_BUFFER, balls[i].vertexNum * 3 * sizeof(float), balls[i].vertexData, GL_STATIC_DRAW);
+		glGenBuffers(1, &blocks[i].VBO);
+		glBindBuffer(GL_ARRAY_BUFFER, blocks[i].VBO);
+		glBufferData(GL_ARRAY_BUFFER, blocks[i].vertexNum * 3 * sizeof(float), blocks[i].vertexData, GL_STATIC_DRAW);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
 		glEnableVertexAttribArray(0);
 
-		glGenBuffers(1, &balls[i].EBO);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, balls[i].EBO);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, balls[i].faceNum * 3 * sizeof(unsigned int), balls[i].vertexFace, GL_STATIC_DRAW);
+		glGenBuffers(1, &blocks[i].EBO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, blocks[i].EBO);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, blocks[i].faceNum * 3 * sizeof(unsigned int), blocks[i].vertexFace, GL_STATIC_DRAW);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(unsigned int), (void*)0);
-	}*/
+	}
 }
