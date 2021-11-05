@@ -32,6 +32,7 @@ GLvoid SpecialKey(int key, int x, int y);
 std::random_device rd;
 std::default_random_engine dre(rd());
 std::uniform_int_distribution<>uid(0, 3);
+std::uniform_real_distribution<>urd(50, 500);
 
 double RED = 0.3f, GREEN = 0.3f, BLUE = 0.5f;
 GLuint shaderProgram, WindowID;
@@ -48,8 +49,8 @@ public:
 	float* vertexColor;
 	unsigned int* vertexFace;
 	glm::mat4 trans{ 1.0f };
-	float rotX{}, rotY{}, rotZ{}, transX{}, transY{}, transZ{}, scaleX{ 1.0f }, scaleY{ 1.0f }, scaleZ{ 1.0f }, speed, x, z;
-	int head{};
+	float rotX{}, rotY{}, rotZ{}, transX{}, transY{}, transZ{}, scaleX{ 1.0f }, scaleY{ 1.0f }, scaleZ{ 1.0f }, speed, x, z, maxY{};
+	bool up;
 	structure(const char* FileName, float R, float G, float B) {
 		VAO = VBO = EBO = vertexNum = faceNum = 0;
 		//--- 1. 전체 버텍스 개수 및 삼각형 개수 세기
@@ -93,6 +94,11 @@ public:
 
 	structure() {
 		VAO = VBO = EBO = vertexNum = faceNum = 0;
+		up = true;
+		maxY = urd(dre);
+		std::uniform_real_distribution<>now(25, maxY);
+		scaleY = now(dre);
+		speed = uid(dre) + 1;
 		//--- 1. 전체 버텍스 개수 및 삼각형 개수 세기
 		FILE* objFile = fopen("Box.obj", "r");
 		char count[100];
@@ -117,9 +123,9 @@ public:
 			fscanf(objFile, "%s", count);
 			if (count[0] == 'v' && count[1] == '\0') {
 				fscanf(objFile, "%f %f %f", &vertexData[vertIndex], &vertexData[vertIndex + 1], &vertexData[vertIndex + 2]);
-				vertexColor[vertIndex++] = 0.2;
-				vertexColor[vertIndex++] = 0.2;
-				vertexColor[vertIndex++] = 0.2;
+				vertexColor[vertIndex++] = 0.8;
+				vertexColor[vertIndex++] = 0.8;
+				vertexColor[vertIndex++] = 0.8;
 			}
 			else if (count[0] == 'f' && count[1] == '\0') {
 				fscanf(objFile, "%d %d %d", &vertexFace[faceIndex], &vertexFace[faceIndex + 1], &vertexFace[faceIndex + 2]);
@@ -217,6 +223,7 @@ structure finish("Plane.obj", 0, 1, 0);
 structure player("sphere.obj", 1, 0, 0);
 structure* blocks;
 Cam top(0, 300, 0, glm::vec3(0, 0, -1));
+Cam smalltop(0, 100, 0, glm::vec3(0, 0, -1));
 Cam FPP(-50, 0, -50, glm::vec3(0, 1, 0));
 Cam TPP(-50, 0, -50, glm::vec3(0, 1, 0));
 Cam Map(0, 100, -300, glm::vec3(0, 1, 0));
@@ -250,10 +257,10 @@ void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 	for (int i = 0; i < 1; ++i) {
 		std::cout << "가로, 세로 : ";
 		std::cin >> hor >> ver;
-		//if (hor < 5 || ver < 5) {
-		//	std::cout << "최소 6 이상을 입력하셔야 합니다." << std::endl;
-		//	i--;
-		//}
+		if (hor < 5 || ver < 5) {
+			std::cout << "최소 6 이상을 입력하셔야 합니다." << std::endl;
+			i--;
+		}
 	}
 	field = new int* [ver];
 	route = new int* [ver];
@@ -261,6 +268,7 @@ void main(int argc, char** argv)								//--- 윈도우 출력하고 콜백함수 설정
 		field[i] = new int[hor];
 		route[i] = new int[hor];
 	}
+	glutTimerFunc(10, Timer, 0);
 	setroute();
 	InitBuffer();
 	glutMainLoop();												// 이벤트 처리 시작
@@ -1000,6 +1008,25 @@ GLvoid SpecialKey(int key, int x, int y) {
 }
 
 GLvoid Timer(int value) {
+	switch (value) {
+	case 0:												// 장애물 높이 타이머
+		for (int i = 0; i < blockNum; ++i) {
+			if (blocks[i].up) {
+				blocks[i].scaleY += blocks[i].speed;
+			}
+			else {
+				blocks[i].scaleY -= blocks[i].speed;
+			}
+			if (blocks[i].scaleY <= FieldScale / 10 / hor / 2) {
+				blocks[i].up = true;
+			}
+			else if (blocks[i].scaleY >= blocks[i].maxY) {
+				blocks[i].up = false;
+			}
+		}
+		glutTimerFunc(10, Timer, 0);
+		break;
+	}
 	glutPostRedisplay();
 }
 
